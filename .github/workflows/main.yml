@@ -29,25 +29,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Set app version for Play Store
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          p = Path("pubspec.yaml")
-          text = p.read_text()
-          text, count = re.subn(
-              r'(?m)^version:\s*.*$',
-              'version: 1.0.1+2',
-              text,
-              count=1
-          )
-          if count != 1:
-              raise SystemExit("Version line not found in pubspec.yaml")
-          p.write_text(text)
-          PY
-
       - name: Generate Android platform files
         run: flutter create --project-name school_management_system --org com.ilyasmobile --platforms=android .
 
@@ -82,6 +63,7 @@ jobs:
           fi
 
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+
           test -s android/app/upload-keystore.jks
 
           cat > android/key.properties <<EOF
@@ -95,28 +77,36 @@ jobs:
           from pathlib import Path
           import re
 
-          p = Path("android/app/build.gradle.kts")
-          text = p.read_text()
+          kts = Path("android/app/build.gradle.kts")
+          groovy = Path("android/app/build.gradle")
 
-          if "import java.util.Properties" not in text:
-              text = "import java.util.Properties\nimport java.io.FileInputStream\n\n" + text
+          if kts.exists():
+              p = kts
+              text = p.read_text()
 
-          if "keystoreProperties" not in text:
-              match = re.search(r"plugins\s*\{.*?\}", text, re.S)
-              if not match:
-                  raise SystemExit("Plugins block not found")
+              imports = (
+                  "import java.util.Properties\n"
+                  "import java.io.FileInputStream\n\n"
+              )
 
-              setup = """
+              if "import java.util.Properties" not in text:
+                  text = imports + text
+
+              if "keystoreProperties" not in text:
+                  plugin_match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not plugin_match:
+                      raise SystemExit("Could not find plugins block")
+
+                  setup = """
           val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
-          if (!keystorePropertiesFile.exists()) {
-              error("key.properties not found")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
-          keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           """
-              text = text[:match.end()] + "\n" + setup + text[match.end():]
+                  text = text[:plugin_match.end()] + "\n" + setup + text[plugin_match.end():]
 
-          signing = """
+              signing = """
               signingConfigs {
                   create("release") {
                       keyAlias = keystoreProperties["keyAlias"] as String
@@ -127,47 +117,122 @@ jobs:
               }
           """
 
-          if 'create("release")' not in text:
-              text = text.replace("    buildTypes {", signing + "\n    buildTypes {", 1)
+              if 'create("release")' not in text:
+                  if "    buildTypes {" not in text:
+                      raise SystemExit("Could not find buildTypes block")
+                  text = text.replace(
+                      "    buildTypes {",
+                      signing + "\n    buildTypes {",
+                      1
+                  )
 
-          text = text.replace(
-              'signingConfigs.getByName("debug")',
-              'signingConfigs.getByName("release")'
-          )
+              if 'signingConfigs.getByName("debug")' in text:
+                  text = text.replace(
+                      'signingConfigs.getByName("debug")',
+                      'signingConfigs.getByName("release")'
+                  )
+              elif 'signingConfigs.getByName("release")' not in text:
+                  text = re.sub(
+                      r'(release\s*\{)',
+                      r'\1\n            signingConfig = signingConfigs.getByName("release")',
+                      text,
+                      count=1
+                  )
 
-          if 'signingConfig = signingConfigs.getByName("release")' not in text:
-              text = re.sub(
-                  r'(getByName\("release"\)\s*\{)',
-                  r'\1\n            signingConfig = signingConfigs.getByName("release")',
-                  text,
-                  count=1
-              )
+              p.write_text(text)
 
-          p.write_text(text)
-          print("Release signing configured.")
+          elif groovy.exists():
+              p = groovy
+              text = p.read_text()
+
+              if "keystoreProperties" not in text:
+                  plugin_match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not plugin_match:
+                      raise SystemExit("Could not find plugins block")
+
+                  setup = """
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+          """
+                  imports = (
+                      "import java.util.Properties\n"
+                      "import java.io.FileInputStream\n\n"
+                  )
+                  text = imports + text
+                  plugin_match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  text = text[:plugin_match.end()] + "\n" + setup + text[plugin_match.end():]
+
+              signing = """
+              signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+          """
+
+              if "signingConfigs {" not in text:
+                  if "    buildTypes {" not in text:
+                      raise SystemExit("Could not find buildTypes block")
+                  text = text.replace(
+                      "    buildTypes {",
+                      signing + "\n    buildTypes {",
+                      1
+                  )
+
+              if "signingConfig signingConfigs.debug" in text:
+                  text = text.replace(
+                      "signingConfig signingConfigs.debug",
+                      "signingConfig signingConfigs.release"
+                  )
+              elif "signingConfig signingConfigs.release" not in text:
+                  text = re.sub(
+                      r'(release\s*\{)',
+                      r'\1\n            signingConfig signingConfigs.release',
+                      text,
+                      count=1
+                  )
+
+              p.write_text(text)
+
+          else:
+              raise SystemExit("Android app Gradle file not found")
+
+          print("Release signing configuration completed.")
           PY
 
       - name: Analyze Dart source
         run: flutter analyze lib --no-fatal-infos --no-fatal-warnings
 
       - name: Build release APK
-        working-directory: android
-        run: ./gradlew assembleRelease -x lintVitalAnalyzeRelease
+        run: flutter build apk --release
 
       - name: Build signed Play Store AAB
-        working-directory: android
-        run: ./gradlew bundleRelease -x lintVitalAnalyzeRelease
+        run: flutter build appbundle --release
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          set -e
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          test -s build/app/outputs/bundle/release/app-release.aab
+          echo "APK and AAB files were created."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: school-management-system-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Upload signed AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: school-management-system-signed-aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
