@@ -1,3 +1,4 @@
+
 name: Build School Management System APK and AAB
 
 on:
@@ -11,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -38,39 +40,165 @@ jobs:
           elif [ -f android/app/build.gradle ]; then
             sed -i "s/applicationId .*/applicationId 'com.ilyasmobile.schoolmanagementsystem'/" android/app/build.gradle
           else
-            echo 'Could not find Android app Gradle file' >&2
+            echo "Android Gradle file not found"
             exit 1
           fi
 
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Configure Release Signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -e
+
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "ERROR: One or more GitHub signing secrets are missing."
+            exit 1
+          fi
+
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          kts = Path("android/app/build.gradle.kts")
+          groovy = Path("android/app/build.gradle")
+
+          if kts.exists():
+              p = kts
+              text = p.read_text()
+
+              if "keystoreProperties" not in text:
+                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not match:
+                      raise SystemExit("Could not find plugins block in build.gradle.kts")
+                  setup = '''
+          
+          val keystoreProperties = java.util.Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+          }
+          '''
+                  text = text[:match.end()] + setup + text[match.end():]
+
+              signing = '''
+              signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = file(keystoreProperties["storeFile"] as String)
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+          '''
+
+              if 'create("release")' not in text:
+                  if "    buildTypes {" not in text:
+                      raise SystemExit("Could not find buildTypes block in build.gradle.kts")
+                  text = text.replace("    buildTypes {", signing + "\n    buildTypes {", 1)
+
+              if 'signingConfigs.getByName("debug")' in text:
+                  text = text.replace(
+                      'signingConfigs.getByName("debug")',
+                      'signingConfigs.getByName("release")'
+                  )
+              elif 'signingConfigs.getByName("release")' not in text:
+                  text = re.sub(
+                      r'(release\s*\{)',
+                      r'\1\n            signingConfig = signingConfigs.getByName("release")',
+                      text,
+                      count=1
+                  )
+
+              p.write_text(text)
+
+          elif groovy.exists():
+              p = groovy
+              text = p.read_text()
+
+              if "keystoreProperties" not in text:
+                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if match:
+                      setup = '''
+          
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+          '''
+                      text = text[:match.end()] + setup + text[match.end():]
+                  else:
+                      raise SystemExit("Could not find plugins block in build.gradle")
+
+              signing = '''
+              signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile file(keystoreProperties['storeFile'])
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+          '''
+
+              if "signingConfigs {" not in text:
+                  if "    buildTypes {" not in text:
+                      raise SystemExit("Could not find buildTypes block in build.gradle")
+                  text = text.replace("    buildTypes {", signing + "\n    buildTypes {", 1)
+
+              if "signingConfig signingConfigs.debug" in text:
+                  text = text.replace(
+                      "signingConfig signingConfigs.debug",
+                      "signingConfig signingConfigs.release"
+                  )
+              elif "signingConfig signingConfigs.release" not in text:
+                  text = re.sub(
+                      r'(release\s*\{)',
+                      r'\1\n            signingConfig signingConfigs.release',
+                      text,
+                      count=1
+                  )
+
+              p.write_text(text)
+          else:
+              raise SystemExit("No Android app Gradle file found")
+
+          print("Release signing configuration completed.")
+          PY
+
       - name: Analyze Dart source
         run: flutter analyze lib --no-fatal-infos --no-fatal-warnings
 
-      # The repository's old widget test referenced a non-existent MyApp class.
-      # Skip flutter test until proper app startup tests are authored for this app.
-      # Android Lint crashes inside image_picker_android's ExifDataCopier.java
-      # on this toolchain (NoSuchMethodError in JavaDocParser). Skip only the
-      # crashing lintVital task; Gradle still compiles and packages the app.
-      - name: Build release APK (skip crashing Android lint task)
+      - name: Build release APK and AAB
         working-directory: android
-        run: ./gradlew assembleRelease -x lintVitalAnalyzeRelease
-
-      - name: Build Play Store AAB (skip crashing Android lint task)
-        working-directory: android
-        run: ./gradlew bundleRelease -x lintVitalAnalyzeRelease
+        run: ./gradlew assembleRelease bundleRelease -x lintVitalAnalyzeRelease
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: school-management-system-apk
+          name: school-management-system-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
-      - name: Upload AAB artifact
+      - name: Upload signed AAB artifact
         uses: actions/upload-artifact@v4
         with:
-          name: school-management-system-aab
+          name: school-management-system-signed-aab
           path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
