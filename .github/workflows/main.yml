@@ -58,11 +58,13 @@ jobs:
           set -e
 
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "ERROR: One or more GitHub signing secrets are missing."
+            echo "ERROR: Missing GitHub signing secrets."
             exit 1
           fi
 
           echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+
+          test -s android/app/upload-keystore.jks
 
           cat > android/key.properties <<EOF
           storePassword=$KEYSTORE_PASSWORD
@@ -82,21 +84,29 @@ jobs:
               p = kts
               text = p.read_text()
 
+              imports = (
+                  "import java.util.Properties\n"
+                  "import java.io.FileInputStream\n\n"
+              )
+
+              if "import java.util.Properties" not in text:
+                  text = imports + text
+
               if "keystoreProperties" not in text:
-                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
-                  if not match:
-                      raise SystemExit("Could not find plugins block in build.gradle.kts")
-                  setup = '''
-          
-          val keystoreProperties = java.util.Properties()
+                  plugin_match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not plugin_match:
+                      raise SystemExit("Could not find plugins block")
+
+                  setup = """
+          val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
           if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
-          '''
-                  text = text[:match.end()] + setup + text[match.end():]
+          """
+                  text = text[:plugin_match.end()] + "\n" + setup + text[plugin_match.end():]
 
-              signing = '''
+              signing = """
               signingConfigs {
                   create("release") {
                       keyAlias = keystoreProperties["keyAlias"] as String
@@ -105,12 +115,16 @@ jobs:
                       storePassword = keystoreProperties["storePassword"] as String
                   }
               }
-          '''
+          """
 
               if 'create("release")' not in text:
                   if "    buildTypes {" not in text:
-                      raise SystemExit("Could not find buildTypes block in build.gradle.kts")
-                  text = text.replace("    buildTypes {", signing + "\n    buildTypes {", 1)
+                      raise SystemExit("Could not find buildTypes block")
+                  text = text.replace(
+                      "    buildTypes {",
+                      signing + "\n    buildTypes {",
+                      1
+                  )
 
               if 'signingConfigs.getByName("debug")' in text:
                   text = text.replace(
@@ -132,21 +146,26 @@ jobs:
               text = p.read_text()
 
               if "keystoreProperties" not in text:
-                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
-                  if match:
-                      setup = '''
-          
+                  plugin_match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not plugin_match:
+                      raise SystemExit("Could not find plugins block")
+
+                  setup = """
           def keystoreProperties = new Properties()
           def keystorePropertiesFile = rootProject.file('key.properties')
           if (keystorePropertiesFile.exists()) {
               keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
           }
-          '''
-                      text = text[:match.end()] + setup + text[match.end():]
-                  else:
-                      raise SystemExit("Could not find plugins block in build.gradle")
+          """
+                  imports = (
+                      "import java.util.Properties\n"
+                      "import java.io.FileInputStream\n\n"
+                  )
+                  text = imports + text
+                  plugin_match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  text = text[:plugin_match.end()] + "\n" + setup + text[plugin_match.end():]
 
-              signing = '''
+              signing = """
               signingConfigs {
                   release {
                       keyAlias keystoreProperties['keyAlias']
@@ -155,12 +174,16 @@ jobs:
                       storePassword keystoreProperties['storePassword']
                   }
               }
-          '''
+          """
 
               if "signingConfigs {" not in text:
                   if "    buildTypes {" not in text:
-                      raise SystemExit("Could not find buildTypes block in build.gradle")
-                  text = text.replace("    buildTypes {", signing + "\n    buildTypes {", 1)
+                      raise SystemExit("Could not find buildTypes block")
+                  text = text.replace(
+                      "    buildTypes {",
+                      signing + "\n    buildTypes {",
+                      1
+                  )
 
               if "signingConfig signingConfigs.debug" in text:
                   text = text.replace(
@@ -176,8 +199,9 @@ jobs:
                   )
 
               p.write_text(text)
+
           else:
-              raise SystemExit("No Android app Gradle file found")
+              raise SystemExit("Android app Gradle file not found")
 
           print("Release signing configuration completed.")
           PY
