@@ -48,7 +48,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Configure Release Signing
+      - name: Configure Release Signing and Android Lint
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -59,7 +59,7 @@ jobs:
           set -e
 
           if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "ERROR: Missing GitHub signing secrets."
+            echo "ERROR: One or more GitHub signing secrets are missing."
             exit 1
           fi
 
@@ -91,19 +91,34 @@ jobs:
               if "import java.util.Properties" not in text:
                   text = imports + text
 
-              setup = """
+              if "val keystoreProperties =" not in text:
+                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not match:
+                      raise SystemExit("Could not find Kotlin plugins block")
+
+                  setup = """
           val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
           if (keystorePropertiesFile.exists()) {
               keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
           """
-
-              if "val keystoreProperties =" not in text:
-                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
-                  if not match:
-                      raise SystemExit("Could not find Kotlin plugins block")
                   text = text[:match.end()] + "\n" + setup + "\n" + text[match.end():]
+
+              android_match = re.search(r"\bandroid\s*\{", text)
+              if not android_match:
+                  raise SystemExit("Could not find Kotlin android block")
+
+              if "checkReleaseBuilds = false" not in text:
+                  insert_at = android_match.end()
+                  lint_config = """
+              lint {
+                  checkReleaseBuilds = false
+                  abortOnError = false
+              }
+
+          """
+                  text = text[:insert_at] + "\n" + lint_config + text[insert_at:]
 
               signing = """
               signingConfigs {
@@ -150,19 +165,34 @@ jobs:
               if "import java.util.Properties" not in text:
                   text = imports + text
 
-              setup = """
+              if "def keystoreProperties =" not in text:
+                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
+                  if not match:
+                      raise SystemExit("Could not find Groovy plugins block")
+
+                  setup = """
           def keystoreProperties = new Properties()
           def keystorePropertiesFile = rootProject.file('key.properties')
           if (keystorePropertiesFile.exists()) {
               keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
           }
           """
-
-              if "def keystoreProperties =" not in text:
-                  match = re.search(r"plugins\s*\{.*?\}", text, re.S)
-                  if not match:
-                      raise SystemExit("Could not find Groovy plugins block")
                   text = text[:match.end()] + "\n" + setup + "\n" + text[match.end():]
+
+              android_match = re.search(r"\bandroid\s*\{", text)
+              if not android_match:
+                  raise SystemExit("Could not find Groovy android block")
+
+              if "checkReleaseBuilds = false" not in text:
+                  insert_at = android_match.end()
+                  lint_config = """
+              lint {
+                  checkReleaseBuilds = false
+                  abortOnError = false
+              }
+
+          """
+                  text = text[:insert_at] + "\n" + lint_config + text[insert_at:]
 
               signing = """
               signingConfigs {
@@ -201,7 +231,7 @@ jobs:
           else:
               raise SystemExit("Android app Gradle file not found")
 
-          print("Release signing configured successfully.")
+          print("Release signing and Android lint configuration completed.")
           PY
 
       - name: Analyze Dart source
@@ -211,18 +241,18 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleRelease -x lint -x lintRelease -x lintVitalAnalyzeRelease -x lintVitalReportRelease
+          ./gradlew assembleRelease
 
       - name: Build signed Play Store AAB
         working-directory: android
         run: |
-          ./gradlew bundleRelease -x lint -x lintRelease -x lintVitalAnalyzeRelease -x lintVitalReportRelease
+          ./gradlew bundleRelease
 
       - name: Verify release files
         run: |
           test -s android/app/build/outputs/apk/release/app-release.apk
           test -s android/app/build/outputs/bundle/release/app-release.aab
-          echo "APK and AAB created successfully"
+          echo "APK and AAB files created successfully."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
