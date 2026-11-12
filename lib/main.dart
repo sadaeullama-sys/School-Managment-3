@@ -3698,11 +3698,11 @@ class _ClassDocumentsModuleState extends State<ClassDocumentsModule> {
 
   // Four professional PDF themes shared by all school documents.
   PdfColor get designColor => [
-    designColor,
+    PdfColors.blue900,
     PdfColors.teal800,
     PdfColors.purple900,
     PdfColors.brown900,
-  ][selectedDesign];
+  ][selectedDesign.clamp(0, 3)];
 
   PdfColor get designLight => [
     PdfColors.blue50,
@@ -3740,7 +3740,33 @@ class _ClassDocumentsModuleState extends State<ClassDocumentsModule> {
     if (d != null) setState(() => feeMonth = DateTime(d.year, d.month));
   }
 
+  bool _generatingPdf = false;
+
+  // Show a visible result for every tap and surface PDF errors to the user.
   Future<void> makeClassPdf(String kind) async {
+    if (_generatingPdf) return;
+    setState(() => _generatingPdf = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Preparing $kind PDF...')),
+    );
+    try {
+      await _makeClassPdfInternal(kind);
+    } catch (e, st) {
+      debugPrint('PDF generation failed ($kind): $e\\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF could not be created: $e'),
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _generatingPdf = false);
+    }
+  }
+
+  Future<void> _makeClassPdfInternal(String kind) async {
     final list = classStudents;
     if (list.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('اس کلاس میں کوئی طالب علم موجود نہیں۔')));
@@ -3940,8 +3966,10 @@ class _ClassDocumentsModuleState extends State<ClassDocumentsModule> {
           leading: CircleAvatar(backgroundColor: lightBlue, child: Icon(item.$3, color: blue)),
           title: Text(item.$2, style: const TextStyle(fontWeight: FontWeight.bold)),
           subtitle: Text('Class: $selectedClass • Students: $count'),
-          trailing: const Icon(Icons.picture_as_pdf),
-          onTap: () => makeClassPdf(item.$1),
+          trailing: _generatingPdf
+              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.picture_as_pdf),
+          onTap: _generatingPdf ? null : () => makeClassPdf(item.$1),
         )),
       const SizedBox(height: 8),
       const Text('ہر منتخب کلاس کے ہر طالب علم کی الگ PDF دستاویز بنے گی۔ فیس سلپ منتخب مہینے کے حساب سے ہوگی۔ DMC کے لیے پہلے Exams میں نمبر درج کریں۔', style: TextStyle(color: Colors.black54)),
