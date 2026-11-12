@@ -110,7 +110,6 @@ jobs:
                   raise SystemExit("Could not find Kotlin android block")
 
               if "checkReleaseBuilds = false" not in text:
-                  insert_at = android_match.end()
                   lint_config = """
               lint {
                   checkReleaseBuilds = false
@@ -118,7 +117,7 @@ jobs:
               }
 
           """
-                  text = text[:insert_at] + "\n" + lint_config + text[insert_at:]
+                  text = text[:android_match.end()] + "\n" + lint_config + text[android_match.end():]
 
               signing = """
               signingConfigs {
@@ -184,7 +183,6 @@ jobs:
                   raise SystemExit("Could not find Groovy android block")
 
               if "checkReleaseBuilds = false" not in text:
-                  insert_at = android_match.end()
                   lint_config = """
               lint {
                   checkReleaseBuilds = false
@@ -192,7 +190,7 @@ jobs:
               }
 
           """
-                  text = text[:insert_at] + "\n" + lint_config + text[insert_at:]
+                  text = text[:android_match.end()] + "\n" + lint_config + text[android_match.end():]
 
               signing = """
               signingConfigs {
@@ -250,20 +248,20 @@ jobs:
 
       - name: Verify release files
         run: |
-          test -s android/app/build/outputs/apk/release/app-release.apk
-          test -s android/app/build/outputs/bundle/release/app-release.aab
+          test -s build/app/outputs/flutter-apk/app-release.apk
+          test -s build/app/outputs/bundle/release/app-release.aab
           echo "APK and AAB files created successfully."
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: school-management-system-release-apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
       - name: Upload signed AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: school-management-system-signed-aab
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          path: build/app/outputs/bundle/release/app-release.aab
           if-no-files-found: error
