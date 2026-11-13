@@ -3,7 +3,6 @@ import 'dart:math';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/pdf.dart';
@@ -94,14 +93,12 @@ class _StartPageState extends State<StartPage> {
       await Future<void>.delayed(const Duration(milliseconds: 150));
       final p = await SharedPreferences.getInstance();
 
-      final active = p.getBool('academy_license_active') ?? false;
       final username = p.getString('academy_customer_username') ?? '';
 
       if (!mounted) return;
 
-      final Widget next = !active
-          ? const LicensePage()
-          : (username.isEmpty ? const SetupPage() : const PortalHomePage());
+      final Widget next =
+          username.isEmpty ? const SetupPage() : const PortalHomePage();
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => next),
@@ -166,239 +163,6 @@ Future<String> getDeviceId() async {
 }
 
 // یہ محفوظ شدہ App Installation ID ہے، حقیقی hardware ID نہیں۔
-
-// ================= LICENSE PAGE =================
-
-class LicensePage extends StatefulWidget {
-  const LicensePage({super.key});
-
-  @override
-  State<LicensePage> createState() => _LicensePageState();
-}
-
-class _LicensePageState extends State<LicensePage> {
-  final keyController = TextEditingController();
-
-  String deviceId = 'Loading...';
-  String error = '';
-
-  static int logoTaps = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    loadDeviceId();
-  }
-
-  Future<void> loadDeviceId() async {
-    final id = await getDeviceId();
-
-    if (!mounted) return;
-
-    setState(() => deviceId = id);
-  }
-
-  Future<void> activate() async {
-    final p = await SharedPreferences.getInstance();
-
-    final savedKey =
-        p.getString('academy_generated_license') ?? '';
-
-    if (keyController.text.trim().isEmpty) {
-      setState(() => error = 'براہ کرم لائسنس کی درج کریں');
-      return;
-    }
-
-    if (keyController.text.trim() != savedKey) {
-      setState(() => error = 'غلط لائسنس کی');
-      return;
-    }
-
-    final licensedDevice =
-        p.getString('academy_license_device') ?? '';
-
-    if (licensedDevice != deviceId) {
-      setState(() => error = 'یہ لائسنس اس ڈیوائس کے لیے نہیں ہے');
-      return;
-    }
-
-    await p.setBool('academy_license_active', true);
-
-    await p.setString(
-      'academy_name',
-      p.getString('academy_license_school') ?? 'My School',
-    );
-
-    if (!mounted) return;
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const SetupPage()),
-    );
-  }
-
-  @override
-  void dispose() {
-    keyController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [navy, blue, Color(0xFF397FC0)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: SafeArea(
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(22),
-              child: Card(
-                elevation: 12,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(25),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          logoTaps++;
-
-                          if (logoTaps >= 5) {
-                            logoTaps = 0;
-
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const AdminLoginPage(),
-                              ),
-                            );
-                          }
-                        },
-                        child: const CircleAvatar(
-                          radius: 48,
-                          backgroundColor: lightBlue,
-                          child: Icon(
-                            Icons.school,
-                            size: 55,
-                            color: navy,
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      const Text(
-                        'SCHOOL MANAGEMENT SYSTEM',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
-                          color: navy,
-                        ),
-                      ),
-
-                      const SizedBox(height: 22),
-
-                      const Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Device ID',
-                          style: TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                      ),
-
-                      const SizedBox(height: 7),
-
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: lightBlue,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: SelectableText(
-                                deviceId,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () {
-                                Clipboard.setData(
-                                  ClipboardData(text: deviceId),
-                                );
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Device ID کاپی ہوگئی'),
-                                  ),
-                                );
-                              },
-                              icon: const Icon(Icons.copy),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      TextField(
-                        controller: keyController,
-                        decoration: const InputDecoration(
-                          labelText: 'Enter License Key',
-                          prefixIcon: Icon(Icons.vpn_key),
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: FilledButton(
-                          onPressed: activate,
-                          child: const Text('ACTIVATE LICENSE'),
-                        ),
-                      ),
-
-                      if (error.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          error,
-                          style: const TextStyle(color: Colors.red),
-                        ),
-                      ],
-
-                      const SizedBox(height: 20),
-
-                      const Text(
-                        'License Support: 03161847676',
-                        style: TextStyle(fontSize: 15),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 // ================= SCHOOL LOGIN SETUP =================
 
@@ -522,7 +286,7 @@ class PortalHomePage extends StatelessWidget {
                     portalButton(
                       context: context,
                       title: 'Admin Login',
-                      subtitle: 'System administration and license settings',
+                      subtitle: 'System administration and subscription settings',
                       icon: Icons.admin_panel_settings,
                       color: gold,
                       onPressed: () => open(context, const AdminLoginPage()),
@@ -1244,7 +1008,7 @@ class _SchoolSubscriptionPageState extends State<SchoolSubscriptionPage> {
   );
 }
 
-// ================= ADMIN LICENSE GENERATOR =================
+// ================= SYSTEM ADMIN PANEL =================
 
 class AdminPanelPage extends StatefulWidget {
   const AdminPanelPage({super.key});
@@ -1257,9 +1021,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   @override
   void initState() { super.initState(); loadPaymentAccounts(); }
 
-  final school = TextEditingController();
-  final phone = TextEditingController();
-  final deviceId = TextEditingController();
   final jazzcashTitle = TextEditingController();
   final jazzcashNumber = TextEditingController();
   final easypaisaTitle = TextEditingController();
@@ -1267,9 +1028,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
   final bankName = TextEditingController();
   final bankTitle = TextEditingController();
   final bankAccount = TextEditingController();
-
-  String duration = '1 Month';
-  String generatedKey = '';
 
   Future<void> loadPaymentAccounts() async {
     try {
@@ -1302,40 +1060,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save payment details: $e')));
     }
-  }
-
-  Future<void> generate() async {
-    if (school.text.trim().isEmpty ||
-        phone.text.trim().isEmpty ||
-        deviceId.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter School, Mobile and Device ID'),
-        ),
-      );
-      return;
-    }
-
-    final random = Random.secure();
-
-    final code = List.generate(
-      20,
-      (_) => random.nextInt(16).toRadixString(16).toUpperCase(),
-    ).join();
-
-    final key = 'SMS-$code';
-
-    final p = await SharedPreferences.getInstance();
-
-    await p.setString('academy_generated_license', key);
-    await p.setString('academy_license_school', school.text.trim());
-    await p.setString('academy_license_phone', phone.text.trim());
-    await p.setString('academy_license_device', deviceId.text.trim());
-    await p.setString('academy_license_duration', duration);
-
-    setState(() {
-      generatedKey = key;
-    });
   }
 
   Future<void> _setSchoolStatus(String schoolId, String status) async {
@@ -1386,9 +1110,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
 
   @override
   void dispose() {
-    school.dispose();
-    phone.dispose();
-    deviceId.dispose();
     jazzcashTitle.dispose(); jazzcashNumber.dispose();
     easypaisaTitle.dispose(); easypaisaNumber.dispose();
     bankName.dispose(); bankTitle.dispose(); bankAccount.dispose();
@@ -1492,101 +1213,6 @@ class _AdminPanelPageState extends State<AdminPanelPage> {
           const SizedBox(height: 12),
           FilledButton.icon(onPressed: savePaymentAccounts, icon: const Icon(Icons.save), label: const Text('Save Payment Details')),
           const Divider(height: 30),
-          const Text('License Generator', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: navy)),
-          const Icon(
-            Icons.verified_user,
-            size: 60,
-            color: blue,
-          ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: school,
-            decoration: const InputDecoration(
-              labelText: 'School Name',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: phone,
-            keyboardType: TextInputType.phone,
-            decoration: const InputDecoration(
-              labelText: 'Customer Mobile Number',
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: deviceId,
-            decoration: const InputDecoration(
-              labelText: 'Customer Device ID',
-            ),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: duration,
-            decoration: const InputDecoration(
-              labelText: 'License Duration',
-            ),
-            items: const [
-              DropdownMenuItem(
-                value: '1 Month',
-                child: Text('1 Month'),
-              ),
-              DropdownMenuItem(
-                value: '3 Months',
-                child: Text('3 Months'),
-              ),
-              DropdownMenuItem(
-                value: '1 Year',
-                child: Text('1 Year'),
-              ),
-              DropdownMenuItem(
-                value: 'Lifetime',
-                child: Text('Lifetime'),
-              ),
-            ],
-            onChanged: (v) {
-              if (v != null) {
-                setState(() => duration = v);
-              }
-            },
-          ),
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            onPressed: generate,
-            icon: const Icon(Icons.key),
-            label: const Text('Generate License Key'),
-          ),
-          if (generatedKey.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            const Text('Generated License Key'),
-            SelectableText(
-              generatedKey,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                Clipboard.setData(
-                  ClipboardData(text: generatedKey),
-                );
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Key Copied'),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.copy),
-              label: const Text('Copy Key'),
-            ),
-          ],
-          const SizedBox(height: 18),
-          const Text(
-            'Note: This is a local prototype. Secure activation '
-            'on another device and expiry enforcement are not implemented.',
-            style: TextStyle(color: Colors.red),
-          ),
         ],
       ),
     );
